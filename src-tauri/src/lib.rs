@@ -1,12 +1,46 @@
+mod disk;
 mod icons;
 mod junk;
 mod leftovers;
+mod orphans;
 mod programs;
 mod quarantine;
+mod shell;
 mod startup;
 mod store;
 mod tracker;
 mod uninstall;
+
+#[tauri::command(async)]
+fn scan_orphans() -> Vec<orphans::Orphan> {
+    orphans::scan(&programs::list())
+}
+
+#[tauri::command]
+fn disk_drives() -> Vec<disk::Drive> {
+    disk::drives()
+}
+
+#[tauri::command(async)]
+fn disk_analyze(path: String) -> Result<Vec<disk::DiskEntry>, String> {
+    disk::analyze(&path)
+}
+
+#[tauri::command]
+fn context_menu_enabled() -> bool {
+    shell::is_registered()
+}
+
+#[tauri::command]
+fn set_context_menu(enabled: bool, label: String) -> Result<(), String> {
+    shell::set(enabled, &label)
+}
+
+/// Program passed on the command line by the "Uninstall with Purge" menu, if any.
+#[tauri::command(async)]
+fn launch_request() -> Option<Program> {
+    shell::launch_request()
+}
 
 #[tauri::command(async)]
 fn list_store_apps() -> Result<Vec<store::StoreApp>, String> {
@@ -115,8 +149,14 @@ fn is_admin() -> bool {
 }
 
 #[tauri::command(async)]
-fn uninstall(program: Program) -> Result<i32, String> {
-    let code = uninstall::run(&program.uninstall_string)?;
+fn uninstall(program: Program, quiet: bool) -> Result<i32, String> {
+    let command = if quiet {
+        uninstall::quiet_command(&program.uninstall_string, &program.quiet_uninstall_string)
+            .unwrap_or_else(|| program.uninstall_string.clone())
+    } else {
+        program.uninstall_string.clone()
+    };
+    let code = uninstall::run(&command)?;
     // Squirrel/Electron and some NSIS uninstallers return immediately and keep working
     // in the background; give them time to drop their uninstall entry before we scan.
     // ponytail: fixed 30s cap; track the spawned process tree if this proves too short.
@@ -167,10 +207,18 @@ fn delete_session(id: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             list_programs,
             is_admin,
             program_icons,
+            scan_orphans,
+            disk_drives,
+            disk_analyze,
+            context_menu_enabled,
+            set_context_menu,
+            launch_request,
             list_store_apps,
             remove_store_app,
             scan_junk,

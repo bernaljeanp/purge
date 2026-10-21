@@ -3,11 +3,16 @@ import type { CSSProperties, ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Archive,
+  ArrowUp,
   Boxes,
   Check,
   Download,
   Eraser,
+  FileText,
   FolderOpen,
+  HardDrive,
+  Settings,
+  X,
   LoaderCircle,
   Package,
   Power,
@@ -22,6 +27,9 @@ import {
   Zap,
 } from "lucide-react";
 import LightBar, { Backdrop, type Rgb } from "./Shader";
+import { check, type Update } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { getVersion } from "@tauri-apps/api/app";
 import logo from "./assets/logo.svg";
 import { locale, t } from "./i18n";
 import "./App.css";
@@ -60,6 +68,8 @@ type StartupItem = {
 type StoreApp = { name: string; fullName: string; publisher: string; version: string; logo: string };
 type JunkGroup = { id: string; path: string; sizeBytes: number };
 type Trace = { id: string; name: string; created: number; items: Leftover[] };
+type Orphan = { path: string; sizeBytes: number; modified: number };
+type DiskEntry = { name: string; path: string; sizeBytes: number; isDir: boolean };
 
 type Step =
   | { kind: "running" }
@@ -68,7 +78,7 @@ type Step =
   | { kind: "moving"; permanent: boolean }
   | { kind: "done"; outcome: Outcome; permanent: boolean };
 
-type View = "programs" | "store" | "startup" | "cleaner" | "tracker" | "quarantine";
+type View = "programs" | "store" | "startup" | "cleaner" | "disk" | "tracker" | "quarantine";
 type Sort = "name" | "size" | "date";
 
 const LIGHTS: Record<string, string> = { lunar: "#4fc8ff", plasma: "#a685ff", ember: "#ff9a3c", arctic: "#e4ecf6" };
@@ -159,6 +169,16 @@ export default function App() {
   const [step, setStep] = useState<Step | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [quiet, setQuiet] = useState(() => readPref("purge.quiet", "0") === "1");
+  const [orphans, setOrphans] = useState<Orphan[] | "scanning" | null>(null);
+  const [orphanPicked, setOrphanPicked] = useState<Set<string>>(new Set());
+  const [drives, setDrives] = useState<{ path: string; total: number; free: number }[]>([]);
+  const [diskPath, setDiskPath] = useState<string | null>(null);
+  const [diskEntries, setDiskEntries] = useState<DiskEntry[] | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState(false);
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [appVersion, setAppVersion] = useState("");
 
   const loadIcons = (sources: string[]) => {
     const wanted = [...new Set(sources.filter(Boolean))];
@@ -202,7 +222,18 @@ export default function App() {
     reloadStartup();
     reloadTracker();
     invoke<boolean>("is_admin").then(setAdmin);
+    invoke<boolean>("context_menu_enabled").then(setContextMenu);
+    invoke<{ path: string; total: number; free: number }[]>("disk_drives").then(setDrives);
+    getVersion().then(setAppVersion);
+    // Quiet background check; offline or no release yet just means no banner
+    check()
+      .then(setUpdate)
+      .catch(() => {});
+    // Opened from "Uninstall with Purge" on a shortcut
+    invoke<Program | null>("launch_request").then((p) => p && start([p]));
   }, []);
+
+  useEffect(() => writePref("purge.quiet", quiet ? "1" : "0"), [quiet]);
 
   // Lazy-load the slower views the first time they're opened
   useEffect(() => {
@@ -269,7 +300,7 @@ export default function App() {
     setStep({ kind: "running" });
     let note: string | undefined;
     try {
-      const code = await invoke<number>("uninstall", { program: p });
+      const code = await invoke<number>("uninstall", { program: p, quiet });
       if (code !== 0) note = t.exitCode(code);
     } catch (e) {
       note = t.cantStart(String(e));
@@ -417,6 +448,72 @@ export default function App() {
     }
   };
 
+  const scanOrphans = async () => {
+    setOrphans("scanning");
+    setOrphanPicked(new Set());
+    setOrphans(await invoke<Orphan[]>("scan_orphans"));
+  };
+  const quarantineOrphans = async () => {
+    if (!Array.isArray(orphans)) return;
+    const items: Leftover[] = orphans.filter((o) => orphanPicked.has(o.path)).map((o) => ({ kind: "file", path: o.path, sizeBytes: o.sizeBytes }));
+    setWorking("orphans");
+    try {
+      const o = await invoke<Outcome>("quarantine_items", { program: t.orphansSession, items });
+      setToast(o.errors.length ? t.restoredPartial(o.done, o.errors.length) : t.doneMoved(o.done));
+      await Promise.all([scanOrphans(), reload()]);
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const openDisk = async (path: string | null) => {
+    setDiskPath(path);
+    setDiskEntries(null);
+    if (!path) return;
+    try {
+      setDiskEntries(await invoke<DiskEntry[]>("disk_analyze", { path }));
+    } catch (e) {
+      setToast(String(e));
+      setDiskEntries([]);
+    }
+  };
+  /** "C:\Users\x" -> "C:\Users", "C:\Users" -> "C:\", "C:\" -> null (drive list) */
+  const diskParent = (path: string) => {
+    if (/^[a-z]:\\$/i.test(path)) return null;
+    const trimmed = path.replace(/\\$/, "");
+    const i = trimmed.lastIndexOf("\\");
+    return i === 2 ? trimmed.slice(0, 3) : trimmed.slice(0, i);
+  };
+
+  const toggleContextMenu = async (enabled: boolean) => {
+    try {
+      await invoke("set_context_menu", { enabled, label: t.contextMenuLabel });
+      setContextMenu(enabled);
+    } catch (e) {
+      setToast(String(e));
+    }
+  };
+  const checkUpdates = async () => {
+    try {
+      const u = await check();
+      setUpdate(u);
+      if (!u) setToast(t.upToDate);
+    } catch (e) {
+      setToast(String(e));
+    }
+  };
+  const installUpdate = async () => {
+    if (!update) return;
+    setWorking("update");
+    try {
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (e) {
+      setToast(String(e));
+      setWorking(null);
+    }
+  };
+
   const restore = async (s: Session) => {
     const o = await invoke<Outcome>("restore_session", { id: s.id });
     setToast(o.errors.length ? t.restoredPartial(o.done, o.errors.length) : t.restored(s.program));
@@ -435,7 +532,8 @@ export default function App() {
     (!!step && step.kind !== "review" && step.kind !== "done") ||
     programs === null ||
     (view === "store" && store === null) ||
-    (view === "cleaner" && junk === null);
+    (view === "cleaner" && (junk === null || orphans === "scanning")) ||
+    (view === "disk" && !!diskPath && diskEntries === null);
   const lightRgb = deleting ? DANGER : rgb(LIGHTS[light] ?? LIGHTS.lunar);
 
   const current = queue[index];
@@ -446,6 +544,7 @@ export default function App() {
     { id: "store", label: t.storeApps, icon: <ShoppingBag size={16} />, count: store?.length },
     { id: "startup", label: t.startup, icon: <Power size={16} />, count: startupOn },
     { id: "cleaner", label: t.cleaner, icon: <Eraser size={16} /> },
+    { id: "disk", label: t.disk, icon: <HardDrive size={16} /> },
     { id: "tracker", label: t.tracker, icon: <Radar size={16} />, count: traces.length || undefined },
     { id: "quarantine", label: t.quarantine, icon: <Archive size={16} />, count: sessions.length || undefined },
   ];
@@ -484,6 +583,15 @@ export default function App() {
               />
             ))}
           </div>
+          {update && (
+            <button className="key primary small" disabled={working === "update"} onClick={installUpdate}>
+              {working === "update" ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}
+              {working === "update" ? t.updating : t.updateAvailable(update.version)}
+            </button>
+          )}
+          <button className={`icon-btn ${settingsOpen ? "on" : ""}`} aria-label={t.settings} title={t.settings} aria-expanded={settingsOpen} onClick={() => setSettingsOpen(!settingsOpen)}>
+            <Settings size={16} />
+          </button>
           <span className={`admin ${admin ? "" : "warn"}`} title={admin ? t.admin : t.limited}>
             {admin ? <ShieldCheck size={16} /> : <ShieldAlert size={16} />}
             {admin ? t.admin : t.limited.split(" — ")[0]}
@@ -607,6 +715,10 @@ export default function App() {
                 <strong>{selected.size}</strong> {t.selected} <span className="dim">{fmtSize(selectedKb * 1024)}</span>
               </span>
               <span className="spacer" />
+              <label className="quiet" title={t.quietHint}>
+                <Toggle on={quiet} label={t.quietHint} onChange={setQuiet} />
+                {t.quiet}
+              </label>
               <button className="key" onClick={() => setSelected(new Set())}>
                 {t.clear}
               </button>
@@ -675,7 +787,7 @@ export default function App() {
         )}
 
         {view === "cleaner" && (
-          <section className="view">
+          <section className="view scroll">
             <div className="hero">
               <h1>{t.cleaner}</h1>
               <p className="lede">{t.cleanerDesc}</p>
@@ -711,11 +823,124 @@ export default function App() {
                 </button>
               </div>
             )}
+
+            <h2 className="section-title">{t.orphansTitle}</h2>
+            <p className="lede small">{t.orphansDesc}</p>
+            {orphans === null && (
+              <div className="footer-actions">
+                <button className="key" onClick={scanOrphans}>
+                  <Search size={15} /> {t.orphansScan}
+                </button>
+              </div>
+            )}
+            {orphans === "scanning" && <Empty icon={<LoaderCircle className="spin" size={22} />}>{t.orphansScanning}</Empty>}
+            {Array.isArray(orphans) && !orphans.length && <Empty icon={<ShieldCheck size={22} />}>{t.orphansNone}</Empty>}
+            {Array.isArray(orphans) && orphans.length > 0 && (
+              <>
+                <div className="list short">
+                  {orphans.map((o) => (
+                    <label key={o.path} className="row simple pick">
+                      <span className="name">
+                        <input type="checkbox" className="check" checked={orphanPicked.has(o.path)} onChange={() => setOrphanPicked(toggleIn(orphanPicked, o.path))} />
+                        <span>
+                          <strong className="ellipsis" title={o.path}>
+                            {o.path}
+                          </strong>
+                          <small>{t.lastUsed(new Date(o.modified).toLocaleDateString(locale))}</small>
+                        </span>
+                      </span>
+                      <span />
+                      <span className="num big">{fmtSize(o.sizeBytes)}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="footer-actions">
+                  <span className="spacer" />
+                  <button className="key" onClick={() => openFolder([...orphanPicked][0] ?? orphans[0].path)}>
+                    <FolderOpen size={15} /> {t.openInExplorer}
+                  </button>
+                  <button className="key primary" disabled={!orphanPicked.size || working === "orphans"} onClick={quarantineOrphans}>
+                    {working === "orphans" ? <LoaderCircle className="spin" size={15} /> : <Archive size={15} />} {t.orphansMove(orphanPicked.size)}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {view === "disk" && (
+          <section className="view">
+            <div className="hero">
+              <h1>{diskPath ?? t.disk}</h1>
+              <p className="lede">
+                {diskPath && diskEntries
+                  ? t.diskSummary(diskEntries.length, fmtSize(diskEntries.reduce((s, e) => s + e.sizeBytes, 0)))
+                  : t.diskDesc}
+              </p>
+            </div>
+            {!diskPath ? (
+              <div className="drives">
+                {drives.map((d) => (
+                  <button key={d.path} className="drive" onClick={() => openDisk(d.path)}>
+                    <HardDrive size={22} />
+                    <span className="drive-body">
+                      <b>{d.path}</b>
+                      {d.total > 0 && (
+                        <>
+                          <span className="meter">
+                            <i style={{ width: `${((d.total - d.free) / d.total) * 100}%` }} />
+                          </span>
+                          <small>{t.diskFree(fmtSize(d.free), fmtSize(d.total))}</small>
+                        </>
+                      )}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <>
+                <div className="toolbar">
+                  <button className="key" onClick={() => openDisk(diskParent(diskPath))}>
+                    <ArrowUp size={15} /> {t.up}
+                  </button>
+                  <span className="spacer" />
+                  <button className="key" onClick={() => openFolder(diskPath)}>
+                    <FolderOpen size={15} /> {t.openInExplorer}
+                  </button>
+                </div>
+                <div className="list">
+                  {diskEntries === null && <Empty icon={<LoaderCircle className="spin" size={22} />}>{t.diskMeasuring}</Empty>}
+                  {diskEntries?.length === 0 && <Empty icon={<FolderOpen size={22} />}>{t.diskEmpty}</Empty>}
+                  {diskEntries &&
+                    (() => {
+                      const total = Math.max(1, diskEntries.reduce((s, e) => s + e.sizeBytes, 0));
+                      return diskEntries.slice(0, 300).map((e) => {
+                        const pct = (e.sizeBytes / total) * 100;
+                        return (
+                          <button key={e.path} className="row disk-row" disabled={!e.isDir} onClick={() => openDisk(e.path)} title={e.path}>
+                            <span className="name">
+                              <span className="appicon" style={{ "--s": "30px" } as CSSProperties}>
+                                {e.isDir ? <FolderOpen size={15} /> : <FileText size={15} />}
+                              </span>
+                              <strong className="ellipsis">{e.name}</strong>
+                            </span>
+                            <span className="meter">
+                              <i style={{ width: `${Math.max(pct, 0.4)}%` }} />
+                            </span>
+                            <span className="num dim">{pct >= 0.1 ? `${nf.format(Math.round(pct * 10) / 10)} %` : "<0,1 %"}</span>
+                            <span className="num big">{fmtSize(e.sizeBytes)}</span>
+                          </button>
+                        );
+                      });
+                    })()}
+                </div>
+              </>
+            )}
           </section>
         )}
 
         {view === "tracker" && (
-          <section className="view">
+          <section className="view scroll">
             <div className="hero">
               <h1>{t.tracker}</h1>
               <p className="lede">{t.trackerIntro}</p>
@@ -966,6 +1191,33 @@ export default function App() {
               </>
             )}
           </section>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div className="popover" role="dialog" aria-label={t.settings}>
+          <div className="popover-head">
+            <strong>{t.settings}</strong>
+            <button className="icon-btn" aria-label={t.cancel} onClick={() => setSettingsOpen(false)}>
+              <X size={15} />
+            </button>
+          </div>
+          <label className="setting">
+            <span>
+              {t.contextMenu}
+              <small>{t.contextMenuHint}</small>
+            </span>
+            <Toggle on={contextMenu} label={t.contextMenu} onChange={toggleContextMenu} />
+          </label>
+          <div className="setting">
+            <span>
+              Purge
+              <small>{t.version(appVersion)}</small>
+            </span>
+            <button className="key" onClick={checkUpdates}>
+              {t.checkUpdates}
+            </button>
+          </div>
         </div>
       )}
 

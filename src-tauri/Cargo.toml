@@ -1,6 +1,6 @@
 [package]
 name = "purge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Purge - a clean, modern uninstaller for Windows"
 authors = ["Purge contributors"]
 license = "Apache-2.0"
@@ -20,9 +20,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 winreg = "0.55"
 # Same versions Tauri already pulls in — no extra compile
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_Com"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_UI_Shell", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_Storage_FileSystem"] }
 png = "0.18"
 base64 = "0.22"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 
 [profile.release]
 codegen-units = 1

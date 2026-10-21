@@ -28,7 +28,7 @@ pub struct ScanResult {
 }
 
 /// Names that are never a leftover on their own, whatever a program is called.
-const NEVER: &[&str] = &[
+pub const NEVER: &[&str] = &[
     "microsoft", "windows", "common", "commonfiles", "system", "system32", "programs", "temp",
     "packages", "windowsapps", "installer", "users", "public", "default", "program",
     "programfiles", "software", "classes", "policies", "wow6432node", "intel", "nvidia", "amd",
@@ -66,7 +66,7 @@ pub fn clean_name(name: &str) -> String {
     s.split_whitespace().filter(|t| !is_noise(t)).collect::<Vec<_>>().join(" ")
 }
 
-fn publisher_key(p: &Program) -> Option<String> {
+pub fn publisher_key(p: &Program) -> Option<String> {
     p.publisher.split_whitespace().next().map(norm).filter(|s| s.len() >= 3)
 }
 

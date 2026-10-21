@@ -34,6 +34,26 @@ fn fix_msiexec(exe: &str, args: &str) -> String {
     }
 }
 
+/// An unattended variant of the uninstall command, when we know one is safe:
+/// the program's own QuietUninstallString, MSI (`/qn`) or Inno Setup (`/VERYSILENT`).
+/// None means "no known silent mode" and the caller falls back to the normal wizard.
+pub fn quiet_command(uninstall_string: &str, quiet_uninstall_string: &str) -> Option<String> {
+    if !quiet_uninstall_string.trim().is_empty() {
+        return Some(quiet_uninstall_string.trim().to_string());
+    }
+    let (exe, args) = split_command(uninstall_string);
+    let file = exe.rsplit('\\').next().unwrap_or("").to_ascii_lowercase();
+    if file == "msiexec.exe" || file == "msiexec" {
+        return Some(format!("{exe} {} /qn /norestart", fix_msiexec(&exe, &args)));
+    }
+    // Inno Setup always names it unins000.exe, unins001.exe, ...
+    let inno = file.len() == 12 && file.starts_with("unins") && file.ends_with(".exe") && file[5..8].chars().all(|c| c.is_ascii_digit());
+    if inno {
+        return Some(format!("\"{exe}\" {args} /VERYSILENT /SUPPRESSMSGBOXES /NORESTART").replace("  ", " "));
+    }
+    None
+}
+
 /// Runs the program's own uninstaller and waits for it. Returns its exit code.
 /// ponytail: waits on the launched process only; NSIS-style uninstallers that respawn
 /// from %TEMP% return early, so the UI offers a manual rescan. Track child processes if that bites.
@@ -78,5 +98,16 @@ mod tests {
         assert_eq!(s("MsiExec.exe /I{ABC}"), ("MsiExec.exe".into(), "/I{ABC}".into()));
         assert_eq!(fix_msiexec("MsiExec.exe", "/I{ABC}"), "/X{ABC}");
         assert_eq!(fix_msiexec(r"C:\x\setup.exe", "/I{ABC}"), "/I{ABC}");
+    }
+
+    #[test]
+    fn picks_silent_modes() {
+        assert_eq!(quiet_command("MsiExec.exe /I{ABC}", "").as_deref(), Some("MsiExec.exe /X{ABC} /qn /norestart"));
+        assert_eq!(
+            quiet_command(r#""C:\Program Files\App\unins000.exe""#, "").as_deref(),
+            Some(r#""C:\Program Files\App\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART"#)
+        );
+        assert_eq!(quiet_command(r"C:\App\uninstall.exe", r"C:\App\uninstall.exe /S").as_deref(), Some(r"C:\App\uninstall.exe /S"));
+        assert_eq!(quiet_command(r"C:\App\uninstall.exe", ""), None);
     }
 }
