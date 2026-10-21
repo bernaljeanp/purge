@@ -35,9 +35,9 @@ const NEVER: &[&str] = &[
     "dell", "alienware", "google", "apple", "adobe", "mozilla",
 ];
 
-const REG_ROOTS: [&str; 3] = [r"HKCU\Software", r"HKLM\SOFTWARE", r"HKLM\SOFTWARE\WOW6432Node"];
+pub const REG_ROOTS: [&str; 3] = [r"HKCU\Software", r"HKLM\SOFTWARE", r"HKLM\SOFTWARE\WOW6432Node"];
 
-fn norm(s: &str) -> String {
+pub fn norm(s: &str) -> String {
     s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
 }
 
@@ -83,7 +83,7 @@ pub fn targets(p: &Program) -> Vec<String> {
     t
 }
 
-fn file_roots() -> Vec<PathBuf> {
+pub fn file_roots() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = ["ProgramFiles", "ProgramFiles(x86)", "ProgramW6432", "ProgramData", "APPDATA", "LOCALAPPDATA"]
         .iter()
         .filter_map(env::var_os)
@@ -122,13 +122,13 @@ fn child_dirs(dir: &Path) -> Vec<(PathBuf, String)> {
         .collect()
 }
 
-fn child_keys(path: &str) -> Vec<(String, String)> {
+pub fn child_keys(path: &str) -> Vec<(String, String)> {
     let Some((root, sub)) = split_reg_path(path) else { return vec![] };
     let Ok(k) = root.open_subkey(sub) else { return vec![] };
     k.enum_keys().flatten().map(|n| (format!(r"{path}\{n}"), norm(&n))).collect()
 }
 
-fn dir_size(p: &Path) -> u64 {
+pub fn dir_size(p: &Path) -> u64 {
     let Ok(rd) = fs::read_dir(p) else { return 0 };
     rd.flatten()
         .map(|e| match e.metadata() {

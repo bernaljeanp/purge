@@ -15,10 +15,10 @@
         "title": "Purge",
         "width": 1180,
         "height": 760,
-        "minWidth": 880,
-        "minHeight": 560,
         "theme": "Dark",
-        "backgroundColor": "#07090c"
+        "backgroundColor": "#1a1d21",
+        "resizable": false,
+        "maximizable": false
       }
     ],
     "security": {
