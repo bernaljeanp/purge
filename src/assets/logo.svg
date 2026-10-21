@@ -1,18 +1,18 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2a2f35"/>
-      <stop offset="1" stop-color="#15181b"/>
+      <stop offset="0" stop-color="#2c3238"/>
+      <stop offset="1" stop-color="#14171a"/>
     </linearGradient>
     <linearGradient id="light" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#8fe6ff"/>
-      <stop offset="1" stop-color="#2fb8ff"/>
+      <stop offset="0" stop-color="#9eeaff"/>
+      <stop offset="1" stop-color="#28b4ff"/>
     </linearGradient>
   </defs>
-  <rect x="32" y="32" width="960" height="960" rx="216" fill="url(#body)"/>
-  <rect x="32" y="32" width="960" height="960" rx="216" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="8"/>
-  <path d="M512 176 803 344v336L512 848 221 680V344z" fill="none" stroke="url(#light)" stroke-width="64" stroke-linejoin="round"/>
-  <rect x="352" y="396" width="320" height="56" rx="28" fill="url(#light)"/>
-  <rect x="392" y="490" width="240" height="56" rx="28" fill="url(#light)" fill-opacity=".72"/>
-  <rect x="440" y="584" width="144" height="56" rx="28" fill="url(#light)" fill-opacity=".42"/>
+  <!-- chassis hexagon fills the canvas -->
+  <path d="M512 22 936 267v490L512 1002 88 757V267z" fill="url(#body)"/>
+  <!-- light ring, open at the bottom: the way out -->
+  <path d="M321 892 88 757V267L512 22l424 245v490L703 892" fill="none" stroke="url(#light)" stroke-width="72" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- purge: everything leaves through the opening -->
+  <path d="M512 300v560M366 712l146 148 146-148" fill="none" stroke="url(#light)" stroke-width="92" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>
