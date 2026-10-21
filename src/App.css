@@ -139,7 +139,7 @@ h1 { margin: 0; font-weight: 800; font-stretch: 125%; font-size: 32px; line-heig
 .row.simple { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) auto auto; }
 .row.pick { cursor: pointer; }
 .row:not(.head):hover { background: rgba(255, 255, 255, 0.022); }
-.row.sel { background: color-mix(in srgb, var(--light) 7%, transparent); box-shadow: inset 3px 0 0 var(--light), 0 1px 0 rgba(255, 255, 255, 0.025); }
+.row.sel { background: color-mix(in srgb, var(--light) 7%, transparent); box-shadow: 0 1px 0 rgba(255, 255, 255, 0.025); }
 .row.off { opacity: 0.5; }
 .row.off .appicon { filter: grayscale(1); }
 .row.head { position: sticky; top: 0; z-index: 2; min-height: 34px; padding-top: 0; padding-bottom: 6px; background: var(--chassis); color: var(--faint); font-size: 12.5px; font-weight: 600; }
@@ -254,7 +254,7 @@ h1 { margin: 0; font-weight: 800; font-stretch: 125%; font-size: 32px; line-heig
 .busy { display: flex; align-items: center; gap: 12px; padding: 24px 0 30px; color: var(--dim); }
 .spin { animation: spin 0.9s linear infinite; color: var(--light); }
 .note { margin: 0; padding: 11px 13px; border-radius: 8px; background: var(--groove); color: var(--dim); }
-.note.warn { color: var(--amber); box-shadow: inset 3px 0 0 var(--amber); }
+.note.warn { color: var(--amber); background: color-mix(in srgb, var(--amber) 8%, var(--groove)); }
 .clean { display: flex; align-items: center; gap: 9px; margin: 0; color: var(--ink); }
 .clean svg { color: var(--light); }
 .listhead { display: flex; justify-content: space-between; align-items: center; padding: 0 12px; }
